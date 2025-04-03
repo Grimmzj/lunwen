@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>车次预订数据分析</title>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@3.9.4/dist/full.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        .chart-container {
+            width: 100%;
+            height: 400px;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+<div class="navbar bg-base-100 shadow-lg mb-8">
+    <div class="flex-1">
+        <a class="btn btn-ghost normal-case text-xl">车次预订数据分析</a>
+    </div>
+    <div class="flex-none">
+        <ul class="menu menu-horizontal px-1">
+            <li><a onclick="showTab('route-analysis')">路线分析</a></li>
+            <li><a onclick="showTab('ticket-analysis')">剩余票数分析</a></li>
+            <li><a href="http://localhost:5000/analysis1" target="_blank">车次类型与春运时间分析</a></li>
+            <li><a href="http://localhost:5000/analysis2" target="_blank">出发时间与余票分析</a></li>
+        </ul>
+    </div>
+</div>
+
+<div class="container mx-auto px-4">
+    <!-- 路线分析内容 -->
+    <div id="route-analysis" class="tab-content active">
+        <div class="card bg-white shadow-xl mb-8">
+            <div class="card-body">
+                <h2 class="card-title">各路线可预订车次数量排名</h2>
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra">
+                        <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>路线</th>
+                            <th>可预订车次数量</th>
+                            <th>总车次数量</th>
+                            <th>可预订比例</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for route in routes_data %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ route['路线'] }}</td>
+                            <td>{{ route['可预订车次数量'] }}</td>
+                            <td>{{ route['总车次数量'] }}</td>
+                            <td>{{ route['可预订比例'] }}%</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div class="card bg-white shadow-xl">
+                <div class="card-body">
+                    <h2 class="card-title">可预订车次数量TOP10</h2>
+                    <div id="bookableChart" class="chart-container"></div>
+                </div>
+            </div>
+
+            <div class="card bg-white shadow-xl">
+                <div class="card-body">
+                    <h2 class="card-title">可预订比例TOP10</h2>
+                    <div id="ratioChart" class="chart-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 剩余票数分析内容 -->
+    <div id="ticket-analysis" class="tab-content">
+        <div class="card bg-white shadow-xl mb-8">
+            <div class="card-body">
+                <h2 class="card-title">剩余票数最多的车次</h2>
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra">
+                        <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>车次</th>
+                            <th>路线</th>
+                            <th>总剩余票数</th>
+                            <th>商务座特等座</th>
+                            <th>软卧一等卧</th>
+                            <th>硬卧二等卧</th>
+                            <th>硬座</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for ticket in tickets_data %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ ticket['车次'] }}</td>
+                            <td>{{ ticket['路线'] }}</td>
+                            <td>{{ ticket['总剩余票数'] }}</td>
+                            <td>{{ seat_details[loop.index0]['商务座特等座'] }}</td>
+                            <td>{{ seat_details[loop.index0]['软卧一等卧'] }}</td>
+                            <td>{{ seat_details[loop.index0]['硬卧二等卧'] }}</td>
+                            <td>{{ seat_details[loop.index0]['硬座'] }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-8 mb-8">
+            <div class="card bg-white shadow-xl">
+                <div class="card-body">
+                    <h2 class="card-title">剩余票数TOP10车次</h2>
+                    <div id="ticketChart" class="chart-container"></div>
+                </div>
+            </div>
+
+            <div class="card bg-white shadow-xl">
+                <div class="card-body">
+                    <h2 class="card-title">座位类型分布</h2>
+                    <div id="seatTypeChart" class="chart-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 标签页切换功能
+    function showTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        document.getElementById(tabId).classList.add('active');
+    }
+
+    // 从模板变量获取数据
+    const routeNames = {{ route_names | tojson }};
+    const bookableCounts = {{ bookable_counts | tojson }};
+    const totalCounts = {{ total_counts | tojson }};
+    const bookableRatio = {{ bookable_ratio | tojson }};
+    const trainNumbers = {{ train_numbers | tojson }};
+    const ticketCounts = {{ ticket_counts | tojson }};
+    const routesForTickets = {{ routes_for_tickets | tojson }};
+    const seatDetails = {{ seat_details | tojson }};
+
+    // 路线分析图表
+    const bookableChart = echarts.init(document.getElementById('bookableChart'));
+    bookableChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            }
+        },
+        legend: {
+            data: ['可预订车次', '总车次']
+        },
+        grid: {
+            left: '3%',
+            right: '4%',
+            bottom: '3%',
+            containLabel: true
+        },
+        xAxis: {
+            type: 'value',
+            boundaryGap: [0, 0.01]
+        },
+        yAxis: {
+            type: 'category',
+            data: routeNames
+        },
+        series: [
+            {
+                name: '可预订车次',
+                type: 'bar',
+                data: bookableCounts,
+                itemStyle: {
+                    color: '#36D399'
+                }
+            },
+            {
+                name: '总车次',
+                type: 'bar',
+                data: totalCounts,
+                itemStyle: {
+                    color: '#3ABFF8'
+                }
+            }
+        ]
+    });
+
+    // 可预订比例图表
+    const ratioChart = echarts.init(document.getElementById('ratioChart'));
+    ratioChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            },
+            formatter: '{b}<br/>可预订比例: {c}%'
+        },
+        grid: {
+            left: '3%',
+            right: '4%',
+            bottom: '3%',
+            containLabel: true
+        },
+        xAxis: {
+            type: 'value',
+            max: 100,
+            axisLabel: {
+                formatter: '{value}%'
+            }
+        },
+        yAxis: {
+            type: 'category',
+            data: routeNames
+        },
+        series: [
+            {
+                type: 'bar',
+                data: bookableRatio,
+                itemStyle: {
+                    color: function(params) {
+                        const ratio = params.value;
+                        if (ratio >= 80) return '#36D399';
+                        if (ratio >= 50) return '#FBBD23';
+                        return '#F87272';
+                    }
+                },
+                label: {
+                    show: true,
+                    position: 'right',
+                    formatter: '{c}%'
+                }
+            }
+        ]
+    });
+
+    // 剩余票数图表
+    const ticketChart = echarts.init(document.getElementById('ticketChart'));
+    ticketChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            },
+            formatter: function(params) {
+                const data = params[0];
+                const seatInfo = seatDetails[data.dataIndex];
+                return `
+                    <strong>车次:</strong> ${data.name}<br/>
+                    <strong>路线:</strong> ${routesForTickets[data.dataIndex]}<br/>
+                    <strong>总剩余票数:</strong> ${data.value}<br/>
+                    <strong>商务座:</strong> ${seatInfo.商务座特等座}<br/>
+                    <strong>软卧:</strong> ${seatInfo.软卧一等卧}<br/>
+                    <strong>硬卧:</strong> ${seatInfo.硬卧二等卧}<br/>
+                    <strong>硬座:</strong> ${seatInfo.硬座}
+                `;
+            }
+        },
+        grid: {
+            left: '3%',
+            right: '4%',
+            bottom: '3%',
+            containLabel: true
+        },
+        xAxis: {
+            type: 'value',
+            name: '剩余票数'
+        },
+        yAxis: {
+            type: 'category',
+            data: trainNumbers,
+            axisLabel: {
+                formatter: function(value, index) {
+                    return value + '\n' + routesForTickets[index];
+                }
+            }
+        },
+        series: [
+            {
+                name: '剩余票数',
+                type: 'bar',
+                data: ticketCounts,
+                itemStyle: {
+                    color: function(params) {
+                        const colors = ['#36D399', '#3ABFF8', '#FBBD23', '#F87272', '#A78BFA'];
+                        return colors[params.dataIndex % colors.length];
+                    }
+                },
+                label: {
+                    show: true,
+                    position: 'right',
+                    formatter: '{c}'
+                }
+            }
+        ]
+    });
+
+    // 座位类型分布图表
+    const seatTypeChart = echarts.init(document.getElementById('seatTypeChart'));
+    seatTypeChart.setOption({
+        tooltip: {
+            trigger: 'item',
+            formatter: '{a} <br/>{b}: {c} ({d}%)'
+        },
+        legend: {
+            orient: 'vertical',
+            left: 10,
+            data: ['商务座特等座', '软卧一等卧', '硬卧二等卧', '硬座']
+        },
+        series: [
+            {
+                name: '座位类型分布',
+                type: 'pie',
+                radius: ['50%', '70%'],
+                avoidLabelOverlap: false,
+                itemStyle: {
+                    borderRadius: 10,
+                    borderColor: '#fff',
+                    borderWidth: 2
+                },
+                label: {
+                    show: false,
+                    position: 'center'
+                },
+                emphasis: {
+                    label: {
+                        show: true,
+                        fontSize: '18',
+                        fontWeight: 'bold'
+                    }
+                },
+                labelLine: {
+                    show: false
+                },
+                data: [
+                    {value: seatDetails.reduce((sum, item) => sum + item.商务座特等座, 0), name: '商务座特等座', itemStyle: {color: '#36D399'}},
+                    {value: seatDetails.reduce((sum, item) => sum + item.软卧一等卧, 0), name: '软卧一等卧', itemStyle: {color: '#3ABFF8'}},
+                    {value: seatDetails.reduce((sum, item) => sum + item.硬卧二等卧, 0), name: '硬卧二等卧', itemStyle: {color: '#FBBD23'}},
+                    {value: seatDetails.reduce((sum, item) => sum + item.硬座, 0), name: '硬座', itemStyle: {color: '#F87272'}}
+                ]
+            }
+        ]
+    });
+
+    // 响应式调整
+    window.addEventListener('resize', function() {
+        bookableChart.resize();
+        ratioChart.resize();
+        ticketChart.resize();
+        seatTypeChart.resize();
+    });
+</script>
+</body>
+</html>

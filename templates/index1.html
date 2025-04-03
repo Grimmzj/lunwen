@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>车次类型与春运时间分析</title>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@3.9.4/dist/full.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        .chart-container {
+            width: 100%;
+            height: 400px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+<div class="navbar bg-base-100 shadow-lg mb-8">
+    <div class="flex-1">
+        <a class="btn btn-ghost normal-case text-xl">车次类型与春运时间分析</a>
+    </div>
+</div>
+
+<div class="container mx-auto px-4">
+    <div class="card bg-white shadow-xl mb-8">
+        <div class="card-body">
+            <h2 class="card-title">不同车次类型分布</h2>
+            <div id="trainTypeChart" class="chart-container"></div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div class="card bg-white shadow-xl">
+            <div class="card-body">
+                <h2 class="card-title">各车次类型平均旅行时间</h2>
+                <div id="durationByTypeChart" class="chart-container"></div>
+            </div>
+        </div>
+
+        <div class="card bg-white shadow-xl">
+            <div class="card-body">
+                <h2 class="card-title">旅行时间分布</h2>
+                <div id="durationDistributionChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-white shadow-xl mb-8">
+        <div class="card-body">
+            <h2 class="card-title">车次类型与旅行时间关系</h2>
+            <div id="typeDurationScatterChart" class="chart-container"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 从Flask获取数据
+    const trainData = {{ tickets_data | tojson }};
+    const seatDetails = {{ seat_details | tojson }};
+
+    // 处理数据：提取车次类型和旅行时间
+    const trainTypes = {};
+    const durationData = [];
+
+    trainData.forEach(item => {
+        // 提取车次类型（首字母）
+        const trainNumber = item['车次'];
+        const trainType = trainNumber.charAt(0);
+        const durationText = item['历时1'];
+
+        // 解析旅行时间（HH:MM格式）
+        let hours = 0, minutes = 0;
+        if (durationText) {
+            const parts = durationText.split(':');
+            hours = parseInt(parts[0]) || 0;
+            minutes = parseInt(parts[1]) || 0;
+        }
+        const totalMinutes = hours * 60 + minutes;
+
+        // 统计车次类型
+        if (!trainTypes[trainType]) {
+            trainTypes[trainType] = 0;
+        }
+        trainTypes[trainType]++;
+
+        // 收集旅行时间数据
+        durationData.push({
+            trainType,
+            trainNumber,
+            duration: totalMinutes,
+            route: item['路线']
+        });
+    });
+
+    // 准备车次类型图表数据
+    const typeData = Object.keys(trainTypes).map(type => ({
+        name: type + '字头车次',
+        value: trainTypes[type]
+    }));
+
+    // 准备旅行时间按类型分组数据
+    const typeDurationMap = {};
+    durationData.forEach(item => {
+        if (!typeDurationMap[item.trainType]) {
+            typeDurationMap[item.trainType] = [];
+        }
+        typeDurationMap[item.trainType].push(item.duration);
+    });
+
+    const avgDurationByType = Object.keys(typeDurationMap).map(type => {
+        const durations = typeDurationMap[type];
+        const avg = durations.reduce((sum, d) => sum + d, 0) / durations.length;
+        return {
+            name: type + '字头车次',
+            value: Math.round(avg)
+        };
+    });
+
+    // 1. 车次类型分布图
+    const typeChart = echarts.init(document.getElementById('trainTypeChart'));
+    typeChart.setOption({
+        tooltip: {
+            trigger: 'item',
+            formatter: '{a} <br/>{b}: {c} ({d}%)'
+        },
+        legend: {
+            orient: 'vertical',
+            left: 10,
+            data: typeData.map(item => item.name)
+        },
+        series: [
+            {
+                name: '车次类型分布',
+                type: 'pie',
+                radius: ['40%', '70%'],
+                avoidLabelOverlap: false,
+                itemStyle: {
+                    borderRadius: 10,
+                    borderColor: '#fff',
+                    borderWidth: 2
+                },
+                label: {
+                    show: false,
+                    position: 'center'
+                },
+                emphasis: {
+                    label: {
+                        show: true,
+                        fontSize: '18',
+                        fontWeight: 'bold'
+                    }
+                },
+                labelLine: {
+                    show: false
+                },
+                data: typeData.map((item, index) => ({
+                    ...item,
+                    itemStyle: {
+                        color: ['#36D399', '#3ABFF8', '#FBBD23', '#F87272', '#A78BFA'][index % 5]
+                    }
+                }))
+            }
+        ]
+    });
+
+    // 2. 各车次类型平均旅行时间
+    const durationByTypeChart = echarts.init(document.getElementById('durationByTypeChart'));
+    durationByTypeChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            },
+            formatter: '{b}<br/>平均旅行时间: {c}分钟'
+        },
+        xAxis: {
+            type: 'category',
+            data: avgDurationByType.map(item => item.name)
+        },
+        yAxis: {
+            type: 'value',
+            name: '分钟'
+        },
+        series: [
+            {
+                name: '平均旅行时间',
+                type: 'bar',
+                data: avgDurationByType.map(item => item.value),
+                itemStyle: {
+                    color: function(params) {
+                        return ['#36D399', '#3ABFF8', '#FBBD23', '#F87272', '#A78BFA'][params.dataIndex % 5];
+                    }
+                },
+                label: {
+                    show: true,
+                    position: 'top',
+                    formatter: '{c}分钟'
+                }
+            }
+        ]
+    });
+
+    // 3. 旅行时间分布图
+    const durationDistributionChart = echarts.init(document.getElementById('durationDistributionChart'));
+    durationDistributionChart.setOption({
+        tooltip: {
+            trigger: 'item',
+            formatter: '{a} <br/>{b}: {c}次 ({d}%)'
+        },
+        series: [
+            {
+                name: '旅行时间分布',
+                type: 'pie',
+                radius: ['40%', '70%'],
+                data: [
+                    { value: durationData.filter(d => d.duration < 60).length, name: '1小时以内' },
+                    { value: durationData.filter(d => d.duration >= 60 && d.duration < 120).length, name: '1-2小时' },
+                    { value: durationData.filter(d => d.duration >= 120 && d.duration < 180).length, name: '2-3小时' },
+                    { value: durationData.filter(d => d.duration >= 180 && d.duration < 360).length, name: '3-6小时' },
+                    { value: durationData.filter(d => d.duration >= 360 && d.duration < 720).length, name: '6-12小时' },
+                    { value: durationData.filter(d => d.duration >= 720).length, name: '12小时以上' }
+                ],
+                itemStyle: {
+                    borderRadius: 5,
+                    borderColor: '#fff',
+                    borderWidth: 2
+                },
+                label: {
+                    formatter: '{b}: {c} ({d}%)'
+                },
+                emphasis: {
+                    itemStyle: {
+                        shadowBlur: 10,
+                        shadowOffsetX: 0,
+                        shadowColor: 'rgba(0, 0, 0, 0.5)'
+                    }
+                }
+            }
+        ]
+    });
+
+    // 4. 车次类型与旅行时间散点图
+    const scatterChart = echarts.init(document.getElementById('typeDurationScatterChart'));
+    scatterChart.setOption({
+        tooltip: {
+            formatter: function(params) {
+                return `车次: ${params.data[2]}<br/>类型: ${params.data[3]}<br/>路线: ${params.data[4]}<br/>旅行时间: ${params.data[1]}分钟`;
+            }
+        },
+        xAxis: {
+            name: '车次类型',
+            data: Object.keys(trainTypes)
+        },
+        yAxis: {
+            name: '旅行时间(分钟)'
+        },
+        series: [
+            {
+                symbolSize: 12,
+                data: durationData.map(item => [
+                    item.trainType,
+                    item.duration,
+                    item.trainNumber,
+                    item.trainType + '字头车次',
+                    item.route
+                ]),
+                type: 'scatter',
+                itemStyle: {
+                    color: function(params) {
+                        const types = Object.keys(trainTypes);
+                        return ['#36D399', '#3ABFF8', '#FBBD23', '#F87272', '#A78BFA'][types.indexOf(params.data[3].charAt(0)) % 5];
+                    }
+                }
+            }
+        ]
+    });
+
+    // 响应式调整
+    window.addEventListener('resize', function() {
+        typeChart.resize();
+        durationByTypeChart.resize();
+        durationDistributionChart.resize();
+        scatterChart.resize();
+    });
+</script>
+</body>
+</html>

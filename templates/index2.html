@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>出发时间与余票分析</title>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@3.9.4/dist/full.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        .chart-container {
+            width: 100%;
+            height: 400px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+<div class="navbar bg-base-100 shadow-lg mb-8">
+    <div class="flex-1">
+        <a class="btn btn-ghost normal-case text-xl">出发时间与余票分析</a>
+    </div>
+</div>
+
+<div class="container mx-auto px-4">
+    <div class="card bg-white shadow-xl mb-8">
+        <div class="card-body">
+            <h2 class="card-title">各时段出发车次数量</h2>
+            <div id="departureTimeChart" class="chart-container"></div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div class="card bg-white shadow-xl">
+            <div class="card-body">
+                <h2 class="card-title">各时段平均剩余票数</h2>
+                <div id="ticketsByTimeChart" class="chart-container"></div>
+            </div>
+        </div>
+
+        <div class="card bg-white shadow-xl">
+            <div class="card-body">
+                <h2 class="card-title">座位类型余票分布</h2>
+                <div id="seatTypeAvailabilityChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-white shadow-xl mb-8">
+        <div class="card-body">
+            <h2 class="card-title">出发时间与余票热力图</h2>
+            <div id="heatmapChart" class="chart-container"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 从Flask获取数据
+    const trainData = {{ tickets_data | tojson }};
+    const seatDetails = {{ seat_details | tojson }};
+
+    // 处理数据：提取出发时间和余票信息
+    const timeSlots = [
+        '00:00-04:00', '04:00-08:00', '08:00-12:00',
+        '12:00-16:00', '16:00-20:00', '20:00-24:00'
+    ];
+
+    // 初始化统计数据
+    const departureStats = {};
+    const ticketStats = {};
+    const seatTypeStats = {
+        '商务座特等座': 0,
+        '软卧一等卧': 0,
+        '硬卧二等卧': 0,
+        '硬座': 0
+    };
+
+    timeSlots.forEach(slot => {
+        departureStats[slot] = 0;
+        ticketStats[slot] = 0;
+    });
+
+    // 处理每条数据
+    trainData.forEach((item, index) => {
+        const departureTime = item['出发时间'];
+        const [hourStr] = departureTime.split(':');
+        const hour = parseInt(hourStr);
+
+        // 确定时间段
+        let timeSlot;
+        if (hour >= 0 && hour < 4) timeSlot = '00:00-04:00';
+        else if (hour >= 4 && hour < 8) timeSlot = '04:00-08:00';
+        else if (hour >= 8 && hour < 12) timeSlot = '08:00-12:00';
+        else if (hour >= 12 && hour < 16) timeSlot = '12:00-16:00';
+        else if (hour >= 16 && hour < 20) timeSlot = '16:00-20:00';
+        else timeSlot = '20:00-24:00';
+
+        // 统计出发时间
+        departureStats[timeSlot]++;
+
+        // 统计余票
+        const totalTickets = seatDetails[index]['商务座特等座'] +
+            seatDetails[index]['软卧一等卧'] +
+            seatDetails[index]['硬卧二等卧'] +
+            seatDetails[index]['硬座'];
+        ticketStats[timeSlot] += totalTickets;
+
+        // 统计座位类型余票
+        seatTypeStats['商务座特等座'] += seatDetails[index]['商务座特等座'];
+        seatTypeStats['软卧一等卧'] += seatDetails[index]['软卧一等卧'];
+        seatTypeStats['硬卧二等卧'] += seatDetails[index]['硬卧二等卧'];
+        seatTypeStats['硬座'] += seatDetails[index]['硬座'];
+    });
+
+    // 计算各时段平均余票
+    const avgTicketsByTime = timeSlots.map(slot => ({
+        slot,
+        value: departureStats[slot] > 0 ? Math.round(ticketStats[slot] / departureStats[slot]) : 0
+    }));
+
+    // 准备热力图数据
+    const hours = Array.from({length: 24}, (_, i) => i);
+    const heatmapData = [];
+
+    trainData.forEach((item, index) => {
+        const departureTime = item['出发时间'];
+        const [hourStr] = departureTime.split(':');
+        const hour = parseInt(hourStr);
+
+        const totalTickets = seatDetails[index]['商务座特等座'] +
+            seatDetails[index]['软卧一等卧'] +
+            seatDetails[index]['硬卧二等卧'] +
+            seatDetails[index]['硬座'];
+
+        heatmapData.push([hour, totalTickets, item['车次']]);
+    });
+
+    // 1. 各时段出发车次数量
+    const departureChart = echarts.init(document.getElementById('departureTimeChart'));
+    departureChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            }
+        },
+        xAxis: {
+            type: 'category',
+            data: timeSlots
+        },
+        yAxis: {
+            type: 'value',
+            name: '车次数量'
+        },
+        series: [
+            {
+                name: '出发车次数量',
+                type: 'bar',
+                data: timeSlots.map(slot => departureStats[slot]),
+                itemStyle: {
+                    color: function(params) {
+                        return ['#36D399', '#3ABFF8', '#FBBD23', '#F87272', '#A78BFA', '#A78BFA'][params.dataIndex % 6];
+                    }
+                },
+                label: {
+                    show: true,
+                    position: 'top'
+                }
+            }
+        ]
+    });
+
+    // 2. 各时段平均剩余票数
+    const ticketsByTimeChart = echarts.init(document.getElementById('ticketsByTimeChart'));
+    ticketsByTimeChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            },
+            formatter: '{b}<br/>平均剩余票数: {c}'
+        },
+        xAxis: {
+            type: 'category',
+            data: timeSlots
+        },
+        yAxis: {
+            type: 'value',
+            name: '平均剩余票数'
+        },
+        series: [
+            {
+                name: '平均剩余票数',
+                type: 'bar',
+                data: avgTicketsByTime.map(item => item.value),
+                itemStyle: {
+                    color: function(params) {
+                        const value = params.value;
+                        if (value >= 15) return '#36D399';
+                        if (value >= 10) return '#3ABFF8';
+                        if (value >= 5) return '#FBBD23';
+                        return '#F87272';
+                    }
+                },
+                label: {
+                    show: true,
+                    position: 'top'
+                }
+            }
+        ]
+    });
+
+    // 3. 座位类型余票分布
+    const seatTypeChart = echarts.init(document.getElementById('seatTypeAvailabilityChart'));
+    seatTypeChart.setOption({
+        tooltip: {
+            trigger: 'item',
+            formatter: '{a} <br/>{b}: {c} ({d}%)'
+        },
+        legend: {
+            orient: 'vertical',
+            left: 10,
+            data: Object.keys(seatTypeStats)
+        },
+        series: [
+            {
+                name: '座位类型余票',
+                type: 'pie',
+                radius: ['40%', '70%'],
+                data: Object.keys(seatTypeStats).map((type, index) => ({
+                    name: type,
+                    value: seatTypeStats[type],
+                    itemStyle: {
+                        color: ['#36D399', '#3ABFF8', '#FBBD23', '#F87272'][index % 4]
+                    }
+                })),
+                emphasis: {
+                    itemStyle: {
+                        shadowBlur: 10,
+                        shadowOffsetX: 0,
+                        shadowColor: 'rgba(0, 0, 0, 0.5)'
+                    }
+                },
+                label: {
+                    formatter: '{b}: {c} ({d}%)'
+                }
+            }
+        ]
+    });
+
+    // 4. 出发时间与余票热力图
+    const heatmapChart = echarts.init(document.getElementById('heatmapChart'));
+    heatmapChart.setOption({
+        tooltip: {
+            position: 'top',
+            formatter: function(params) {
+                return `车次: ${params.data[2]}<br/>出发时间: ${params.data[0]}:00左右<br/>剩余票数: ${params.data[1]}`;
+            }
+        },
+        grid: {
+            top: '10%',
+            left: '3%',
+            right: '7%',
+            bottom: '10%'
+        },
+        xAxis: {
+            type: 'category',
+            data: hours,
+            name: '出发时间(小时)',
+            splitArea: {
+                show: true
+            }
+        },
+        yAxis: {
+            type: 'category',
+            name: '剩余票数',
+            data: ['0', '1-5', '6-10', '11-15', '16+'],
+            splitArea: {
+                show: true
+            }
+        },
+        visualMap: {
+            min: 0,
+            max: 20,
+            calculable: true,
+            orient: 'horizontal',
+            left: 'center',
+            bottom: '0%',
+            inRange: {
+                color: ['#f0f0f0', '#F87272', '#FBBD23', '#3ABFF8', '#36D399']
+            }
+        },
+        series: [
+            {
+                name: '余票情况',
+                type: 'heatmap',
+                data: heatmapData.map(item => [
+                    item[0],
+                    Math.min(4, Math.floor(item[1] / 4)),
+                    item[2],
+                    item[1]
+                ]),
+                label: {
+                    show: false
+                },
+                emphasis: {
+                    itemStyle: {
+                        shadowBlur: 10,
+                        shadowOffsetX: 0,
+                        shadowColor: 'rgba(0, 0, 0, 0.5)'
+                    }
+                },
+                progressive: 1000,
+                animation: false
+            }
+        ]
+    });
+
+    // 响应式调整
+    window.addEventListener('resize', function() {
+        departureChart.resize();
+        ticketsByTimeChart.resize();
+        seatTypeChart.resize();
+        heatmapChart.resize();
+    });
+</script>
+</body>
+</html>
